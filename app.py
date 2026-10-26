@@ -7,12 +7,13 @@ from __future__ import annotations
 import csv
 import io
 import math
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import streamlit as st
 import pydeck as pdk
+import streamlit as st
 
 from optimizer import make_demo, optimise_assignments, output_csv, prepare_orders, spatial_grid
 
@@ -20,44 +21,84 @@ st.set_page_config(
     page_title="Warehouse Atlas | Allocation Optimisation",
     page_icon="📍",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
-# Carefully styled to remain legible in either Streamlit theme.
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
-:root { --atlas-blue:#3669e8; --atlas-teal:#159b92; --atlas-ink:#14243d; }
-html, body, [class*="css"], [data-testid="stAppViewContainer"] {font-family:'DM Sans',sans-serif;}
-[data-testid="stAppViewContainer"] {background:linear-gradient(160deg, rgba(240,246,255,0.48), transparent 48%);}
-[data-testid="stSidebar"] {background:linear-gradient(165deg,#11223d 0%,#172d48 85%);}
-[data-testid="stSidebar"] * {color:#eaf0fa !important;}
-[data-testid="stSidebar"] label, [data-testid="stSidebar"] small {color:#c4d2e3 !important;}
-[data-testid="stSidebar"] [data-baseweb="select"] *,[data-testid="stSidebar"] [data-baseweb="input"] * {color:#14243d !important;}
-[data-testid="stSidebar"] [data-testid="stFileUploader"] {border:1px solid #68849c;border-radius:10px;}
-[data-testid="stSidebar"] button {color:#14243d !important;}
-.block-container {padding-top:1.3rem; padding-bottom:2.5rem; max-width:1510px;}
-h1,h2,h3 {font-family:'Space Grotesk',sans-serif;letter-spacing:-0.025em;}
-.hero {padding:27px 32px;border-radius:18px;background:linear-gradient(110deg,#142844,#194774 64%,#236b82);color:#f3f8ff;margin:4px 0 18px;position:relative;overflow:hidden;}
-.hero:after {content:"";position:absolute;right:-36px;top:-65px;width:300px;height:300px;background:radial-gradient(circle,rgba(83,214,202,.22),transparent 70%);border-radius:100%;}
-.hero .kicker {font-size:11px;letter-spacing:.19em;font-weight:800;color:#80dfd3;text-transform:uppercase;margin-bottom:7px;}
-.hero h1 {margin:0;font-size:clamp(28px,3vw,40px);font-weight:700;color:white;line-height:1.12;}
-.hero p {margin:12px 0 0;font-size:14px;color:#d0e2f1;max-width:770px;line-height:1.55;}
-.hero .tag {display:inline-block;margin-top:15px;font-size:11px;border:1px solid rgba(187,222,247,.36);border-radius:20px;padding:5px 11px;color:#d4eeff;}
-.card {border:1px solid rgba(136,158,187,.22);background:var(--secondary-background-color, #fff);padding:17px 19px;border-radius:14px;min-height:120px;box-shadow:0 2px 11px rgba(20,46,83,.035);margin-bottom:8px;}
-.card .eyebrow {color:#76859c;font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;}
-.card .number {color:var(--text-color,#14243d);font-size:clamp(23px,2.2vw,31px);font-weight:800;letter-spacing:-.045em;font-family:'Space Grotesk',sans-serif;margin-top:6px;}
-.card .foot {font-size:12px;color:#77869c;margin-top:3px;}
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap');
+:root {
+  --atlas-ink:#14243d; --atlas-muted:#5f6f86; --atlas-faint:#8693a6;
+  --atlas-line:rgba(136,158,187,.30); --atlas-card:#ffffff; --atlas-soft:#eef2f8;
+  --atlas-teal:#218b85; --atlas-teal-dark:#11766e; --atlas-before:#a5b8d0;
+}
+.block-container {padding-top:2.6rem; padding-bottom:3rem; max-width:1320px;}
+.hero h1, .result h2, .section h3, .empty h3, .brand-name {font-family:'Space Grotesk',sans-serif !important;letter-spacing:-0.02em;}
+[data-testid="stSidebar"] {border-right:1px solid var(--atlas-line);}
+[data-testid="stTabs"] button p {font-size:14px;font-weight:600;}
+
+.brand {margin:-8px 0 18px;}
+.brand-name {font-family:'Space Grotesk',sans-serif;font-size:21px;font-weight:700;color:var(--atlas-ink);}
+.brand-sub {font-size:13px;color:var(--atlas-muted);margin-top:2px;}
+.side-step {font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--atlas-muted);margin:6px 0 4px;}
+
+.hero {padding:28px 32px 26px;border-radius:18px;background:linear-gradient(110deg,#142844,#194774 64%,#236b82);color:#f3f8ff;margin:0 0 16px;position:relative;overflow:hidden;}
+.hero:after {content:"";position:absolute;right:-40px;top:-70px;width:300px;height:300px;background:radial-gradient(circle,rgba(83,214,202,.22),transparent 70%);border-radius:100%;}
+.hero .kicker {font-size:11px;letter-spacing:.19em;font-weight:800;color:#80dfd3;text-transform:uppercase;margin-bottom:8px;}
+.hero h1 {margin:0;padding:0;font-size:clamp(26px,2.8vw,36px);font-weight:700;color:#ffffff;line-height:1.15;}
+.hero p {margin:10px 0 0;font-size:15px;color:#d0e2f1;max-width:760px;line-height:1.55;}
+.steps {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:22px;position:relative;z-index:1;}
+.step {background:rgba(255,255,255,.07);border:1px solid rgba(187,222,247,.22);border-radius:12px;padding:13px 15px;font-size:13px;line-height:1.45;color:#c9dcec;}
+.step b {display:block;color:#ffffff;font-size:14px;margin-bottom:3px;}
+.step .num {display:inline-flex;width:22px;height:22px;border-radius:50%;background:#80dfd3;color:#11223d;font-weight:800;font-size:12px;align-items:center;justify-content:center;margin-bottom:8px;}
+
+.chips {display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px;}
+.chip {font-size:12px;padding:4px 11px;border-radius:999px;background:var(--atlas-soft);color:var(--atlas-muted);font-weight:600;}
+
+.eyebrow {color:var(--atlas-faint);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;}
+.result {display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:36px;align-items:center;padding:26px 30px;border:1px solid var(--atlas-line);border-radius:16px;background:var(--atlas-card);box-shadow:0 2px 12px rgba(20,46,83,.04);margin-bottom:12px;}
+.result h2 {margin:6px 0 8px;padding:0;font-size:clamp(23px,2.3vw,30px);color:var(--atlas-ink);line-height:1.2;}
+.result h2 em {font-style:normal;color:var(--atlas-teal-dark);}
+.result p {margin:0;color:var(--atlas-muted);font-size:14px;line-height:1.55;}
+.bar-row {display:grid;grid-template-columns:82px minmax(0,1fr) 84px;gap:12px;align-items:center;margin:12px 0;}
+.bar-label {font-size:13px;font-weight:700;color:var(--atlas-ink);}
+.bar-track {height:18px;border-radius:9px;background:var(--atlas-soft);overflow:hidden;}
+.bar-fill {height:100%;border-radius:9px;}
+.bar-fill.before {background:var(--atlas-before);}
+.bar-fill.after {background:var(--atlas-teal);}
+.bar-value {font-size:13px;font-weight:700;text-align:right;font-variant-numeric:tabular-nums;color:var(--atlas-ink);}
+
+.card {border:1px solid var(--atlas-line);background:var(--atlas-card);padding:16px 19px;border-radius:14px;box-shadow:0 2px 11px rgba(20,46,83,.035);margin-bottom:8px;}
+.card .number {color:var(--atlas-ink);font-size:clamp(22px,2vw,28px);font-weight:700;letter-spacing:-.03em;font-family:'Space Grotesk',sans-serif;margin-top:6px;font-variant-numeric:tabular-nums;}
+.card .foot {font-size:12.5px;color:var(--atlas-muted);margin-top:2px;}
 .card.featured {background:linear-gradient(125deg,#e8f7f2,#eaf7ff);border-color:#abdfd4;}
-.card.featured .number {color:#11766e;}
-.section-tag {font-weight:800;color:#5b718c;font-size:12px;letter-spacing:.10em;text-transform:uppercase;margin:20px 0 7px;}
-.footnote {font-size:12px;color:#74869c;line-height:1.6;}
-.warehouse-dot {display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;}
-.legend-box {padding:9px 13px;border-radius:9px;background:rgba(148,163,184,.09);font-size:12px;line-height:2.1;margin:5px 0 12px;}
-.map-heading {font-size:16px;font-weight:800;margin:7px 0 4px;color:var(--text-color,#14243d);}
-[data-testid="stMetric"] {padding:8px;}
-[data-testid="stTabs"] button {font-size:13px;}
-@media (max-width:900px){.hero {padding:21px 18px;}.card{min-height:110px;}}
+.card.featured .number {color:var(--atlas-teal-dark);}
+
+.section {margin:38px 0 10px;}
+.section h3 {margin:4px 0 4px;padding:0;font-size:22px;color:var(--atlas-ink);}
+.section p {margin:0;color:var(--atlas-muted);font-size:14px;line-height:1.55;max-width:860px;}
+
+.legend-box {display:flex;flex-wrap:wrap;gap:6px 22px;padding:10px 14px;border-radius:10px;background:var(--atlas-soft);font-size:12.5px;color:var(--atlas-muted);margin:4px 0 12px;}
+.legend-box b {color:var(--atlas-ink);margin-right:4px;}
+.warehouse-dot {display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:-1px;border:2px solid #ffffff;box-shadow:0 0 0 1px rgba(20,36,61,.18);}
+.small-dot {display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:0;}
+.swatch-line {display:inline-block;width:20px;height:3px;border-radius:2px;margin-right:7px;vertical-align:3px;}
+.map-heading {font-size:15px;font-weight:700;margin:6px 0 6px;color:var(--atlas-ink);}
+.map-heading span {font-weight:500;color:var(--atlas-muted);}
+.scale-box {max-width:420px;margin:10px 0 4px;}
+.scale-title {font-size:12px;font-weight:700;color:var(--atlas-ink);margin-bottom:5px;}
+.gradient {height:10px;border-radius:5px;}
+.scale {display:flex;justify-content:space-between;font-size:11.5px;color:var(--atlas-muted);margin-top:4px;}
+
+.empty {padding:26px 30px;border:1px dashed var(--atlas-line);border-radius:16px;background:var(--atlas-card);}
+.empty h3 {margin:0 0 6px;padding:0;color:var(--atlas-ink);}
+.empty p {margin:0;color:var(--atlas-muted);font-size:14px;}
+.footnote {font-size:12px;color:var(--atlas-faint);line-height:1.6;margin-top:22px;}
+@media (max-width:900px){
+  .hero {padding:22px 18px;}
+  .steps, .result {grid-template-columns:1fr;}
+  .result {gap:18px;padding:22px 20px;}
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -67,7 +108,31 @@ COLORS = [
     [166, 170, 62, 225], [224, 102, 166, 225], [98, 121, 158, 225],
     [67, 174, 104, 225],
 ]
+DISTANCE_STOPS = [(28, 165, 143), (150, 200, 98), (244, 190, 64), (236, 125, 60), (201, 67, 72)]
+SAVINGS_STOPS = [(235, 242, 248), (82, 167, 217), (51, 117, 205), (20, 63, 137)]
+BEFORE_LINK = [214, 90, 90, 110]
+AFTER_LINK = [33, 139, 133, 200]
+UNCHANGED_POINT = [148, 163, 184, 150]
 CARTO_STYLE = pdk.map_styles.CARTO_LIGHT
+TOOLTIP = {"text": "{tooltip_text}",
+           "style": {"backgroundColor": "#16273c", "color": "#ffffff", "fontSize": "12px"}}
+MAP_HEIGHT = 430
+MAX_CHANGE_LINKS = 150
+SAMPLE_SOURCE = "Sample Sydney orders"
+UPLOAD_SOURCE = "Upload my own CSV"
+CSV_EXAMPLE = ('orderId,warehouseLocation_Coordinates,customerLocation_Coordinates\n'
+               'ORD001,"(-33.85, 150.90)","(-33.87, 151.21)"\n'
+               'ORD002,"(-33.91, 151.19)","(-33.78, 150.91)"')
+
+
+class MapSettings(NamedTuple):
+    max_points: int
+    show_links: bool
+    cell_km: int
+
+
+def html(markup: str) -> None:
+    st.markdown(markup, unsafe_allow_html=True)
 
 
 def wh_color(index: int) -> list[int]:
@@ -81,11 +146,12 @@ def css_color(index: int) -> str:
 
 def metric_card(label: str, value: str, detail: str, featured: bool = False) -> None:
     css = "card featured" if featured else "card"
-    st.markdown(
-        f'<div class="{css}"><div class="eyebrow">{label}</div><div class="number">{value}</div>'
-        f'<div class="foot">{detail}</div></div>',
-        unsafe_allow_html=True,
-    )
+    html(f'<div class="{css}"><div class="eyebrow">{label}</div><div class="number">{value}</div>'
+         f'<div class="foot">{detail}</div></div>')
+
+
+def section_heading(step: str, title: str, text: str) -> None:
+    html(f'<div class="section"><div class="eyebrow">{step}</div><h3>{title}</h3><p>{text}</p></div>')
 
 
 @st.cache_data(show_spinner=False)
@@ -100,6 +166,23 @@ def get_grid(result: pd.DataFrame, cell_km: float) -> pd.DataFrame:
     return spatial_grid(result, cell_km)
 
 
+def read_upload(uploaded) -> pd.DataFrame:
+    raw_bytes = uploaded.getvalue()
+    text = raw_bytes.decode("utf-8-sig")
+    csv_rows = csv.reader(io.StringIO(text))
+    csv_header = next(csv_rows, None)
+    if not csv_header:
+        raise ValueError("The CSV is empty.")
+    wrong_lines = [line_num for line_num, values in enumerate(csv_rows, start=2)
+                   if len(values) != len(csv_header)]
+    if wrong_lines:
+        raise ValueError(f"Rows {wrong_lines[:8]} have the wrong number of fields. "
+                         "Quote coordinate strings containing commas, e.g. \"(-33.85, 150.90)\".")
+    return pd.read_csv(io.BytesIO(raw_bytes), dtype="string", encoding="utf-8-sig")
+
+
+# --- Maps ---
+
 def calc_view(result: pd.DataFrame, warehouses: pd.DataFrame) -> pdk.ViewState:
     la = pd.concat([result["customer_lat"], warehouses["warehouse_lat"]], ignore_index=True)
     lo = pd.concat([result["customer_lon"], warehouses["warehouse_lon"]], ignore_index=True)
@@ -113,69 +196,99 @@ def calc_view(result: pd.DataFrame, warehouses: pd.DataFrame) -> pdk.ViewState:
 def warehouse_layer(warehouses: pd.DataFrame) -> pdk.Layer:
     records = warehouses.copy()
     records["color"] = [wh_color(i) for i in range(len(records))]
-    records["label"] = records["warehouse_id"] + " · " + records["coordinates"]
-    records["tooltip_text"] = "Warehouse " + records["label"]
+    records["tooltip_text"] = "Warehouse " + records["warehouse_id"] + " · " + records["coordinates"]
     return pdk.Layer(
         "ScatterplotLayer", data=records,
         get_position="[warehouse_lon, warehouse_lat]", get_fill_color="color",
-        get_line_color=[255,255,255,240], line_width_min_pixels=2.5,
+        get_line_color=[255, 255, 255, 240], line_width_min_pixels=2.5,
         radius_min_pixels=9, radius_max_pixels=17, get_radius=200,
         stroked=True, filled=True, pickable=True, auto_highlight=True,
     )
 
 
+def deck(layers: list[pdk.Layer], view: pdk.ViewState) -> pdk.Deck:
+    return pdk.Deck(layers=layers, initial_view_state=view, map_style=CARTO_STYLE, tooltip=TOOLTIP)
+
+
+def sample_rows(frame: pd.DataFrame, limit: int) -> pd.DataFrame:
+    return frame if len(frame) <= limit else frame.sample(n=limit, random_state=42)
+
+
 def coverage_map(result: pd.DataFrame, warehouses: pd.DataFrame, after: bool,
-                 show_connections: bool, view: pdk.ViewState, max_points: int,
-                 max_connections: int = 180) -> tuple[pdk.Deck, int, int]:
-    use = result if len(result) <= max_points else result.sample(n=max_points, random_state=42)
+                 show_links: bool, view: pdk.ViewState, max_points: int,
+                 max_links: int = 180) -> tuple[pdk.Deck, int]:
+    use = sample_rows(result, max_points)
     source_col = "optimised_warehouse" if after else "original_warehouse"
     color_lookup = {wid: wh_color(i) for i, wid in enumerate(warehouses["warehouse_id"])}
     points = use[["orderId", "customer_lon", "customer_lat", "original_distance_km",
-                  "optimised_distance_km", "distance_saved_km", "assignment_status", source_col]].copy()
-    points["warehouse_display"] = points[source_col]
+                  "optimised_distance_km", "assignment_status", source_col]].copy()
     points["color"] = points[source_col].map(color_lookup)
-    points["distance_display"] = np.round(
-        points["optimised_distance_km" if after else "original_distance_km"], 2)
-    points["tooltip_text"] = (points["orderId"].astype(str) + " · " + points["warehouse_display"]
-                              + " · " + points["distance_display"].astype(str) + " km · "
-                              + points["assignment_status"].astype(str))
+    distance = np.round(points["optimised_distance_km" if after else "original_distance_km"], 2)
+    points["tooltip_text"] = (points["orderId"].astype(str) + " · ships from " + points[source_col]
+                              + " · " + distance.astype(str) + " km")
     layers = []
-    arc_n = 0
-    if show_connections:
-        # Show largest improvements first, not all lines: clarity > spaghetti.
-        lines = use.nlargest(max_connections, "distance_saved_km").copy()
+    if show_links:
+        lines = use.nlargest(max_links, "distance_saved_km").copy()
         lines["from_lat"] = lines["optimised_warehouse_lat" if after else "warehouse_lat"]
         lines["from_lon"] = lines["optimised_warehouse_lon" if after else "warehouse_lon"]
-        arc_n = len(lines)
         layers.append(pdk.Layer(
             "LineLayer", data=lines,
             get_source_position="[from_lon, from_lat]",
             get_target_position="[customer_lon, customer_lat]",
-            get_color=[69, 110, 158, 95] if after else [232, 116, 95, 92],
-            get_width=1.5, width_min_pixels=1,
-            pickable=False,
+            get_color=AFTER_LINK if after else BEFORE_LINK,
+            get_width=1.5, width_min_pixels=1, pickable=False,
         ))
     layers.extend([
         pdk.Layer("ScatterplotLayer", data=points,
                   get_position="[customer_lon, customer_lat]", get_fill_color="color",
                   radius_min_pixels=2.5, radius_max_pixels=8, get_radius=90,
                   pickable=True, auto_highlight=True, opacity=0.86),
-        warehouse_layer(warehouses)
+        warehouse_layer(warehouses),
     ])
-    return pdk.Deck(
-        layers=layers, initial_view_state=view, map_style=CARTO_STYLE,
-        tooltip={"text": "{tooltip_text}",
-                 "style": {"backgroundColor": "#16273c", "color": "#ffffff", "fontSize": "12px"}},
-    ), len(points), arc_n
+    return deck(layers, view), len(points)
 
 
-def ramp(value: float, limit: float, kind: str = "distance") -> list[int]:
-    """Stable color ramp with a shared denominator between compared maps."""
+def changes_map(result: pd.DataFrame, warehouses: pd.DataFrame, view: pdk.ViewState,
+                max_points: int) -> tuple[pdk.Deck, int]:
+    color_lookup = {wid: wh_color(i) for i, wid in enumerate(warehouses["warehouse_id"])}
+    reassigned = result.loc[result["assignment_status"].eq("Reassigned")]
+    links = reassigned.nlargest(MAX_CHANGE_LINKS, "distance_saved_km")
+
+    unchanged = sample_rows(result.loc[result["assignment_status"].eq("Unchanged")], max_points).copy()
+    unchanged["tooltip_text"] = (unchanged["orderId"].astype(str) + " · stays with "
+                                 + unchanged["original_warehouse"])
+
+    moved = sample_rows(reassigned, max_points).copy()
+    moved["color"] = moved["optimised_warehouse"].map(color_lookup)
+    moved["tooltip_text"] = (moved["orderId"].astype(str) + " · " + moved["original_warehouse"]
+                             + " → " + moved["optimised_warehouse"] + " · saves "
+                             + moved["distance_saved_km"].round(2).astype(str) + " km")
+
+    layers = [
+        pdk.Layer("LineLayer", data=links,
+                  get_source_position="[warehouse_lon, warehouse_lat]",
+                  get_target_position="[customer_lon, customer_lat]",
+                  get_color=BEFORE_LINK, get_width=1.5, width_min_pixels=1),
+        pdk.Layer("LineLayer", data=links,
+                  get_source_position="[optimised_warehouse_lon, optimised_warehouse_lat]",
+                  get_target_position="[customer_lon, customer_lat]",
+                  get_color=AFTER_LINK, get_width=2, width_min_pixels=1.5),
+        pdk.Layer("ScatterplotLayer", data=unchanged,
+                  get_position="[customer_lon, customer_lat]", get_fill_color=UNCHANGED_POINT,
+                  radius_min_pixels=2, radius_max_pixels=6, get_radius=70,
+                  pickable=True, auto_highlight=True),
+        pdk.Layer("ScatterplotLayer", data=moved,
+                  get_position="[customer_lon, customer_lat]", get_fill_color="color",
+                  get_line_color=[255, 255, 255, 220], line_width_min_pixels=1, stroked=True,
+                  radius_min_pixels=3.5, radius_max_pixels=9, get_radius=110,
+                  pickable=True, auto_highlight=True),
+        warehouse_layer(warehouses),
+    ]
+    return deck(layers, view), len(links)
+
+
+def ramp(value: float, limit: float, stops: list[tuple[int, int, int]]) -> list[int]:
     t = float(np.clip(value / max(limit, 1e-9), 0, 1))
-    # Low = mint, middle = blue, high = orange/red. Red denotes more kilometres.
-    stops = ([(28,165,143), (69,129,211), (244,159,64), (201,67,72)]
-             if kind == "distance" else
-             [(235,242,248), (82,167,217), (51,117,205), (20,63,137)])
     pos = t * (len(stops) - 1)
     k = min(int(pos), len(stops) - 2)
     frac = pos - k
@@ -184,38 +297,53 @@ def ramp(value: float, limit: float, kind: str = "distance") -> list[int]:
 
 
 def grid_map(grid: pd.DataFrame, warehouses: pd.DataFrame, view: pdk.ViewState,
-             value_col: str, scale_max: float, kind: str = "distance") -> pdk.Deck:
-    points = grid.copy()
-    points["color"] = [ramp(v, scale_max, kind) for v in points[value_col]]
-    for col in ["mean_original_km", "mean_optimised_km", "mean_saved_km", "total_saved_km"]:
-        points[col] = points[col].round(2)
-    points["tooltip_text"] = (points["orders"].astype(str) + " orders · Baseline avg "
-                              + points["mean_original_km"].astype(str) + " km · Optimised avg "
-                              + points["mean_optimised_km"].astype(str) + " km · Total saved "
-                              + points["total_saved_km"].astype(str) + " km")
+             value_col: str, scale_max: float, stops: list[tuple[int, int, int]]) -> pdk.Deck:
+    cells = grid.copy()
+    cells["color"] = [ramp(v, scale_max, stops) for v in cells[value_col]]
+    for col in ["mean_original_km", "mean_optimised_km", "total_saved_km"]:
+        cells[col] = cells[col].round(2)
+    cells["tooltip_text"] = (cells["orders"].astype(str) + " orders · today avg "
+                             + cells["mean_original_km"].astype(str) + " km · optimised avg "
+                             + cells["mean_optimised_km"].astype(str) + " km · total saved "
+                             + cells["total_saved_km"].astype(str) + " km")
     layers = [
-        pdk.Layer("PolygonLayer", data=points,
+        pdk.Layer("PolygonLayer", data=cells,
                   get_polygon="polygon", get_fill_color="color",
-                  get_line_color=[255,255,255,80], line_width_min_pixels=0.3,
+                  get_line_color=[255, 255, 255, 80], line_width_min_pixels=0.3,
                   stroked=True, filled=True, pickable=True, auto_highlight=True),
         warehouse_layer(warehouses),
     ]
-    return pdk.Deck(
-        layers=layers, initial_view_state=view, map_style=CARTO_STYLE,
-        tooltip={"text": "{tooltip_text}",
-                 "style": {"backgroundColor": "#16273c", "color": "#ffffff", "fontSize": "12px"}},
-    )
+    return deck(layers, view)
 
 
-def legend(warehouses: pd.DataFrame) -> None:
-    # Clear legend at reasonable warehouse counts; high counts aren't a palette guarantee.
-    blocks = []
+def gradient_legend(title: str, stops: list[tuple[int, int, int]], low: str, high: str) -> None:
+    colours = ", ".join(f"rgb({r},{g},{b})" for r, g, b in stops)
+    html(f'<div class="scale-box"><div class="scale-title">{title}</div>'
+         f'<div class="gradient" style="background:linear-gradient(90deg, {colours})"></div>'
+         f'<div class="scale"><span>{low}</span><span>{high}</span></div></div>')
+
+
+def warehouse_legend(result: pd.DataFrame, warehouses: pd.DataFrame) -> None:
+    before = result["original_warehouse"].value_counts()
+    after = result["optimised_warehouse"].value_counts()
+    items = []
     for idx, row in warehouses.head(12).iterrows():
-        blocks.append(f'<span style="display:inline-block;margin-right:20px"><i class="warehouse-dot" '
-                      f'style="background:{css_color(idx)}"></i>{row.warehouse_id}</span>')
+        wid = row.warehouse_id
+        items.append(f'<span><i class="warehouse-dot" style="background:{css_color(idx)}"></i>'
+                     f'<b>{wid}</b>{int(before.get(wid, 0)):,} → {int(after.get(wid, 0)):,} orders</span>')
     if len(warehouses) > 12:
-        blocks.append(f"+{len(warehouses)-12} further warehouses (colours repeat)")
-    st.markdown('<div class="legend-box">' + "".join(blocks) + "</div>", unsafe_allow_html=True)
+        items.append(f"<span>+{len(warehouses) - 12} more warehouses (colours repeat)</span>")
+    html('<div class="legend-box">' + "".join(items) + "</div>")
+
+
+# --- Charts ---
+
+def style_figure(fig: go.Figure, height: int) -> None:
+    fig.update_layout(
+        height=height, margin=dict(t=30, b=16, l=10, r=10),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Source Sans 3, Source Sans Pro, sans-serif", color="#14243d", size=13),
+    )
 
 
 def chart_movements(result: pd.DataFrame, warehouses: pd.DataFrame) -> None:
@@ -223,18 +351,16 @@ def chart_movements(result: pd.DataFrame, warehouses: pd.DataFrame) -> None:
     after = result["optimised_warehouse"].value_counts()
     ids = warehouses["warehouse_id"].tolist()
     fig = go.Figure()
-    fig.add_bar(name="Original", x=ids, y=[int(before.get(i, 0)) for i in ids],
-                marker_color="#a5b8d0", marker_line_width=0)
+    fig.add_bar(name="Today", x=ids, y=[int(before.get(i, 0)) for i in ids],
+                marker_color="#a5b8d0", marker_line_width=0, texttemplate="%{y:,}", textposition="outside")
     fig.add_bar(name="Optimised", x=ids, y=[int(after.get(i, 0)) for i in ids],
-                marker_color="#218b85", marker_line_width=0)
+                marker_color="#218b85", marker_line_width=0, texttemplate="%{y:,}", textposition="outside")
+    style_figure(fig, 320)
     fig.update_layout(
-        barmode="group", height=330, margin=dict(t=18, b=18, l=18, r=12),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        legend=dict(orientation="h", y=1.14, x=0),
-        yaxis=dict(title="Order count", showgrid=True, gridcolor="rgba(148,163,184,.19)"),
-        xaxis=dict(title=""), font=dict(family="DM Sans"),
+        barmode="group", bargap=0.3, legend=dict(orientation="h", y=1.12, x=0),
+        yaxis=dict(title="Orders", showgrid=True, gridcolor="rgba(148,163,184,.19)"),
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
 def chart_savings(result: pd.DataFrame, warehouses: pd.DataFrame) -> None:
@@ -243,162 +369,245 @@ def chart_savings(result: pd.DataFrame, warehouses: pd.DataFrame) -> None:
     fig = go.Figure(go.Bar(
         x=[float(saved.get(i, 0)) for i in ids], y=ids,
         orientation="h", marker=dict(color=[css_color(i) for i in range(len(ids))]),
-        text=[f"{saved.get(i,0):,.0f} km" for i in ids], textposition="auto",
+        text=[f"{saved.get(i, 0):,.0f} km" for i in ids], textposition="auto",
     ))
+    style_figure(fig, 320)
     fig.update_layout(
-        height=330, margin=dict(t=16,b=18,l=18,r=15),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False, bargap=0.35,
         yaxis=dict(autorange="reversed", title=""),
         xaxis=dict(title="Kilometres saved", showgrid=True, gridcolor="rgba(148,163,184,.19)"),
-        showlegend=False, font=dict(family="DM Sans"),
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
-# --- Sidebar: data source and controllable visual load ---
-with st.sidebar:
-    st.markdown("### ◈ WAREHOUSE ATLAS")
-    st.caption("ALLOCATION INTELLIGENCE / V1")
-    st.divider()
-    data_source = st.radio("DATA SOURCE", ["Sample Sydney data", "Upload CSV"], index=0)
-    if data_source == "Sample Sydney data":
-        demo_n = st.select_slider("Sample orders", options=[100, 500, 1_000, 5_000, 10_000, 25_000], value=100)
-        data = make_demo(count=demo_n)
-        st.download_button("↓ Download this sample CSV", data=data.to_csv(index=False).encode("utf-8-sig"),
-                           file_name=f"sydney_{demo_n}_orders.csv", mime="text/csv", use_container_width=True)
+def transfer_table(result: pd.DataFrame) -> None:
+    moved = result.loc[result["assignment_status"].eq("Reassigned")]
+    if moved.empty:
+        st.caption("No orders were reassigned.")
+        return
+    table = (moved.groupby(["original_warehouse", "optimised_warehouse"], as_index=False)
+             .agg(orders=("orderId", "size"), saved_km=("distance_saved_km", "sum"),
+                  mean_saved_km=("distance_saved_km", "mean"))
+             .sort_values("orders", ascending=False))
+    st.dataframe(table, hide_index=True, width="stretch", column_config={
+        "original_warehouse": st.column_config.TextColumn("From (today)"),
+        "optimised_warehouse": st.column_config.TextColumn("To (optimised)"),
+        "orders": st.column_config.NumberColumn("Orders moved", format="%d"),
+        "saved_km": st.column_config.NumberColumn("Total km saved", format="%.1f"),
+        "mean_saved_km": st.column_config.NumberColumn("Km saved per order", format="%.2f"),
+    })
+
+
+# --- Page sections ---
+
+def render_sidebar() -> tuple[str, pd.DataFrame | None, str | None, MapSettings]:
+    data, error = None, None
+    with st.sidebar:
+        html('<div class="brand"><div class="brand-name">◈ Warehouse Atlas</div>'
+             '<div class="brand-sub">Warehouse allocation optimiser</div></div>')
+        html('<div class="side-step">Orders to analyse</div>')
+        source = st.radio("Orders to analyse", [SAMPLE_SOURCE, UPLOAD_SOURCE], label_visibility="collapsed")
+        if source == SAMPLE_SOURCE:
+            demo_n = st.select_slider("Number of sample orders",
+                                      options=[100, 500, 1_000, 5_000, 10_000, 25_000], value=1_000)
+            data = make_demo(count=demo_n)
+            st.download_button("Download this sample as CSV", data=data.to_csv(index=False).encode("utf-8-sig"),
+                               file_name=f"sydney_{demo_n}_orders.csv", mime="text/csv",
+                               icon=":material/download:", type="tertiary")
+        else:
+            uploaded = st.file_uploader("Upload a CSV", type=["csv"],
+                                        help="A UTF-8 CSV with the three column names shown below.")
+            st.caption("Needs the columns `orderId`, `warehouseLocation_Coordinates` and "
+                       "`customerLocation_Coordinates`.")
+            if uploaded is not None:
+                try:
+                    data = read_upload(uploaded)
+                except Exception as exc:
+                    error = str(exc)
+
+        st.divider()
+        with st.expander("Map display settings"):
+            max_points = st.select_slider("Maximum dots per map",
+                                          options=[1_000, 3_000, 8_000, 15_000, 25_000], value=8_000,
+                                          help="Larger datasets show a random sample of dots. "
+                                               "Totals, heatmaps and downloads always use every order.")
+            show_links = st.checkbox("Draw warehouse links on the before/after maps", value=False,
+                                     help="Draws up to 180 links for the orders with the biggest savings.")
+            cell_km = st.slider("Heatmap square size (km)", min_value=1, max_value=20, value=5, step=1)
+        st.caption("Distances are straight-line kilometres, not road distance. "
+                   "Every warehouse is assumed able to serve every order.")
+    return source, data, error, MapSettings(max_points, show_links, cell_km)
+
+
+def render_hero() -> None:
+    html('<div class="hero">'
+         '<div class="kicker">Warehouse allocation optimiser</div>'
+         '<h1>Ship every order from its nearest warehouse</h1>'
+         '<p>Each order is shipped from a warehouse today. This tool checks every order against every '
+         'warehouse, moves it to the closest one, and shows how much delivery distance that saves.</p>'
+         '<div class="steps">'
+         '<div class="step"><span class="num">1</span><b>Load orders</b>'
+         'Each row has an order, the warehouse it ships from today, and the customer location.</div>'
+         '<div class="step"><span class="num">2</span><b>Measure distances</b>'
+         'Work out the straight-line distance from every customer to every warehouse.</div>'
+         '<div class="step"><span class="num">3</span><b>Pick the nearest</b>'
+         'Reassign each order that has a closer warehouse. Keep the rest as they are.</div>'
+         '</div></div>')
+
+
+def render_upload_help(error: str | None) -> None:
+    if error:
+        st.error(f"We couldn't read that CSV. {error}")
+    html('<div class="empty"><h3>Upload your orders to begin</h3>'
+         '<p>Use the sidebar to upload a CSV, or switch back to the sample Sydney orders. '
+         'The file needs exactly these three columns. Write each coordinate as latitude, longitude '
+         'in brackets, inside double quotes:</p></div>')
+    st.code(CSV_EXAMPLE, language="csv")
+
+
+def render_dataset_chips(source: str, n: int, warehouse_count: int, rejected_count: int) -> None:
+    chips = ["Sample Sydney data" if source == SAMPLE_SOURCE else "Your uploaded data",
+             f"{n:,} orders", f"{warehouse_count:,} warehouses found"]
+    if rejected_count:
+        chips.append(f"{rejected_count:,} invalid rows skipped")
+    html('<div class="chips">' + "".join(f'<span class="chip">{c}</span>' for c in chips) + "</div>")
+
+
+def render_result(result: pd.DataFrame) -> None:
+    n = len(result)
+    reassigned_n = int(result["assignment_status"].eq("Reassigned").sum())
+    baseline_km = float(result["original_distance_km"].sum())
+    optimal_km = float(result["optimised_distance_km"].sum())
+    saved_km = max(0.0, baseline_km - optimal_km)
+    pct = (saved_km / baseline_km * 100) if baseline_km > 0 else 0.0
+    after_width = (optimal_km / baseline_km * 100) if baseline_km > 0 else 0.0
+
+    if reassigned_n == 0:
+        headline = "Every order already ships from its nearest warehouse"
+        summary = "There is nothing to reassign, so the total distance stays the same."
     else:
-        uploaded = st.file_uploader("Upload allocation records", type=["csv"],
-                                    help="Upload a UTF-8 CSV using the three exact column names.")
-        if uploaded is None:
-            st.info("Upload a CSV to begin, or choose the sample dataset.")
-            with st.expander("CSV schema", expanded=True):
-                st.code('orderId,warehouseLocation_Coordinates,customerLocation_Coordinates\n'
-                        'ORD001,"(-33.85, 150.90)","(-33.87, 151.21)"\n'
-                        'ORD002,"(-33.91, 151.19)","(-33.78, 150.91)"', language="csv")
-            st.stop()
-        try:
-            raw_bytes = uploaded.getvalue()
-            text = raw_bytes.decode("utf-8-sig")
-            csv_rows = csv.reader(io.StringIO(text))
-            csv_header = next(csv_rows, None)
-            if not csv_header:
-                raise ValueError("The CSV is empty.")
-            wrong_lines = [line_num for line_num, values in enumerate(csv_rows, start=2)
-                           if len(values) != len(csv_header)]
-            if wrong_lines:
-                raise ValueError(f"Rows {wrong_lines[:8]} have the wrong number of fields. "
-                                 "Quote coordinate strings containing commas, e.g. \"(-33.85, 150.90)\".")
-            data = pd.read_csv(io.BytesIO(raw_bytes), dtype="string", encoding="utf-8-sig")
-        except Exception as exc:
-            st.error(f"Cannot read uploaded CSV: {exc}")
-            st.stop()
-    st.divider()
-    st.markdown("**MAP CONTROLS**")
-    max_points = st.select_slider("Maximum individual map points", options=[1_000, 3_000, 8_000, 15_000, 25_000], value=8_000)
-    connections = st.checkbox("Show example warehouse links", value=False,
-                              help="Draw up to 180 of the highest-savings order links to avoid a dense tangle.")
-    grid_size = st.slider("Heatmap cell size (km)", min_value=1, max_value=20, value=5, step=1)
-    st.caption("Heatmaps aggregate every valid row. Only individual markers are sampled when over the map limit.")
-    st.divider()
-    st.caption("MODEL ASSUMPTIONS")
-    st.caption("All inferred warehouses can fulfil all orders. Distances are Haversine (straight-line kilometres), not road travel.")
+        headline = f"Delivery distance drops <em>{pct:.1f}%</em>"
+        summary = (f"Moving {reassigned_n:,} of {n:,} orders to a closer warehouse saves "
+                   f"{saved_km:,.1f} km of straight-line distance.")
+    html(f'<div class="result"><div><div class="eyebrow">The result</div><h2>{headline}</h2><p>{summary}</p></div>'
+         '<div>'
+         f'<div class="bar-row"><span class="bar-label">Today</span><div class="bar-track">'
+         f'<div class="bar-fill before" style="width:100%"></div></div>'
+         f'<span class="bar-value">{baseline_km:,.0f} km</span></div>'
+         f'<div class="bar-row"><span class="bar-label">Optimised</span><div class="bar-track">'
+         f'<div class="bar-fill after" style="width:{after_width:.1f}%"></div></div>'
+         f'<span class="bar-value">{optimal_km:,.0f} km</span></div>'
+         '</div></div>')
 
-try:
-    prepared, result = analyse(data)
-except Exception as exc:
-    st.error(f"Unable to process dataset: {exc}")
-    st.stop()
+    cards = st.columns(3, gap="small")
+    with cards[0]:
+        metric_card("Distance saved", f"{saved_km:,.1f} km", f"{pct:.1f}% less than today", featured=True)
+    with cards[1]:
+        metric_card("Orders reassigned", f"{reassigned_n:,}",
+                    f"of {n:,} orders ({reassigned_n / n * 100:.0f}%) move to a closer warehouse")
+    with cards[2]:
+        metric_card("Average distance per order", f"{baseline_km / n:,.1f} → {optimal_km / n:,.1f} km",
+                    "today → optimised")
 
-warehouses = prepared.warehouses
-n = len(result)
-reassigned_n = int(result["assignment_status"].eq("Reassigned").sum())
-baseline_km = float(result["original_distance_km"].sum())
-optimal_km = float(result["optimised_distance_km"].sum())
-saved_km = max(0.0, baseline_km - optimal_km)
-pct = (saved_km / baseline_km * 100) if baseline_km > 0 else 0.0
-view = calc_view(result, warehouses)
 
-st.markdown("""
-<div class="hero">
-  <div class="kicker">Network design / Geo-allocation</div>
-  <h1>Fulfil smarter. Travel less.</h1>
-  <p>Measure the cost of your current warehouse assignments, reallocate each order to its nearest eligible warehouse, and see exactly where distance disappears.</p>
-  <span class="tag">◉ Warehouse selection only &nbsp; · &nbsp; No vehicle routing</span>
-</div>""", unsafe_allow_html=True)
+def render_maps(result: pd.DataFrame, warehouses: pd.DataFrame, settings: MapSettings) -> None:
+    section_heading("Step 1", "See the difference on the map",
+                    "Each dot is a customer, coloured by the warehouse that serves it. "
+                    "Large outlined dots are the warehouses. Hover over any dot for details.")
+    warehouse_legend(result, warehouses)
+    view = calc_view(result, warehouses)
+    n = len(result)
+    tabs = st.tabs(["Before vs after", "What changed", "Distance heatmap", "Savings hotspots"])
 
-if data_source == "Sample Sydney data":
-    st.caption(f"DEMO DATA  ·  {n:,} synthetic Sydney orders  ·  {len(warehouses)} inferred warehouses  ·  Seed 42")
-else:
-    st.caption(f"UPLOADED FILE  ·  {n:,} valid records  ·  {len(warehouses):,} inferred warehouse coordinates")
+    with tabs[0]:
+        before_col, after_col = st.columns(2, gap="medium")
+        before_map, shown = coverage_map(result, warehouses, False, settings.show_links, view, settings.max_points)
+        after_map, _ = coverage_map(result, warehouses, True, settings.show_links, view, settings.max_points)
+        with before_col:
+            html('<div class="map-heading">Today <span>· current warehouse for each order</span></div>')
+            st.pydeck_chart(before_map, height=MAP_HEIGHT, key="map_before")
+        with after_col:
+            html('<div class="map-heading">Optimised <span>· nearest warehouse for each order</span></div>')
+            st.pydeck_chart(after_map, height=MAP_HEIGHT, key="map_after")
+        if n > settings.max_points:
+            st.caption(f"Showing a random sample of {shown:,} of {n:,} orders to keep the maps fast. "
+                       "All figures and downloads include every order.")
 
-for message in prepared.notes:
-    st.warning(message)
+    with tabs[1]:
+        changes, link_count = changes_map(result, warehouses, view, settings.max_points)
+        html('<div class="legend-box">'
+             f'<span><i class="swatch-line" style="background:rgba({",".join(map(str, BEFORE_LINK[:3]))},.75)"></i>'
+             'Before: link to current warehouse</span>'
+             f'<span><i class="swatch-line" style="background:rgb({",".join(map(str, AFTER_LINK[:3]))})"></i>'
+             'After: link to nearest warehouse</span>'
+             f'<span><i class="small-dot" style="background:rgb({",".join(map(str, UNCHANGED_POINT[:3]))})"></i>'
+             'Order that stays with its warehouse</span></div>')
+        st.pydeck_chart(changes, height=MAP_HEIGHT + 40, key="map_changes")
+        st.caption(f"Links are drawn for the {link_count:,} reassigned orders with the biggest savings. "
+                   "Coloured dots are reassigned orders, in the colour of their new warehouse.")
 
-kpis = st.columns(5, gap="small")
-with kpis[0]: metric_card("Baseline distance", f"{baseline_km:,.1f}", "km · current assignments")
-with kpis[1]: metric_card("Optimised distance", f"{optimal_km:,.1f}", "km · nearest warehouse")
-with kpis[2]: metric_card("Distance saved", f"{saved_km:,.1f}", "km · reduction", featured=True)
-with kpis[3]: metric_card("Improvement", f"{pct:.1f}%", "of original total", featured=True)
-with kpis[4]: metric_card("Orders reassigned", f"{reassigned_n:,}", f"of {n:,} valid orders")
+    with tabs[2]:
+        grid = get_grid(result, float(settings.cell_km))
+        max_scale = max(float(np.quantile(result["original_distance_km"], .95)), 0.01)
+        gradient_legend("Average distance from warehouse to customer in each square",
+                        DISTANCE_STOPS, "0 km (short)", f"{max_scale:.0f}+ km (long)")
+        left, right = st.columns(2, gap="medium")
+        with left:
+            html('<div class="map-heading">Today</div>')
+            st.pydeck_chart(grid_map(grid, warehouses, view, "mean_original_km", max_scale, DISTANCE_STOPS),
+                            height=MAP_HEIGHT, key="heat_before")
+        with right:
+            html('<div class="map-heading">Optimised</div>')
+            st.pydeck_chart(grid_map(grid, warehouses, view, "mean_optimised_km", max_scale, DISTANCE_STOPS),
+                            height=MAP_HEIGHT, key="heat_after")
+        st.caption(f"Each square is about {settings.cell_km} km wide and includes every order inside it. "
+                   "Both maps use the same colour scale, so greener means shorter trips.")
 
-st.markdown('<div class="section-tag">01 / Geographical comparison</div>', unsafe_allow_html=True)
-legend(warehouses)
-map_tabs = st.tabs(["Allocation maps", "Distance heatmaps", "Savings hotspots", "Order explorer"])
+    with tabs[3]:
+        grid = get_grid(result, float(settings.cell_km))
+        upper = max(float(np.quantile(grid["total_saved_km"], .95)), 0.01)
+        gradient_legend("Total kilometres saved in each square", SAVINGS_STOPS,
+                        "0 km", f"{upper:,.0f}+ km")
+        st.pydeck_chart(grid_map(grid, warehouses, view, "total_saved_km", upper, SAVINGS_STOPS),
+                        height=MAP_HEIGHT + 40, key="savings_map")
+        st.caption("Darker squares are where reassigning orders saves the most distance in total.")
+        hotspots = grid.nlargest(8, "total_saved_km").copy()
+        hotspots["area"] = [f"({lat:.3f}, {lon:.3f})"
+                            for lat, lon in zip(hotspots["center_lat"], hotspots["center_lon"])]
+        st.markdown("**Top 8 areas by distance saved**")
+        st.dataframe(hotspots[["area", "orders", "total_saved_km", "mean_saved_km"]],
+                     hide_index=True, width="stretch", column_config={
+                         "area": st.column_config.TextColumn("Area centre (lat, lon)"),
+                         "orders": st.column_config.NumberColumn("Orders", format="%d"),
+                         "total_saved_km": st.column_config.NumberColumn("Total km saved", format="%.1f"),
+                         "mean_saved_km": st.column_config.NumberColumn("Km saved per order", format="%.2f"),
+                     })
 
-with map_tabs[0]:
-    st.caption("Customer markers are coloured by their assigned warehouse. Both maps use the same centre and zoom. Hover over points to inspect orders.")
-    before, after = st.columns(2, gap="medium")
-    before_map, before_count, before_arcs = coverage_map(result, warehouses, False, connections, view, max_points)
-    after_map, after_count, after_arcs = coverage_map(result, warehouses, True, connections, view, max_points)
-    with before:
-        st.markdown('<div class="map-heading">01 · Existing warehouse allocation</div>', unsafe_allow_html=True)
-        st.pydeck_chart(before_map, height=450, use_container_width=True, key="map_before")
-        st.caption(f"{before_count:,} customer markers · original warehouse assignment")
-    with after:
-        st.markdown('<div class="map-heading">02 · Optimised warehouse allocation</div>', unsafe_allow_html=True)
-        st.pydeck_chart(after_map, height=450, use_container_width=True, key="map_after")
-        st.caption(f"{after_count:,} customer markers · nearest warehouse selection")
-    if n > max_points:
-        st.info(f"For map responsiveness, individual markers are a reproducible sample of {max_points:,} from {n:,} orders. Every order is still optimised and included in all KPIs, heatmaps, and exports.")
-    if connections:
-        st.caption(f"Only up to {before_arcs} highest-potential-saving connections are drawn per map.")
 
-with map_tabs[1]:
-    st.caption("Each coloured grid square displays the average warehouse-to-customer distance for ALL orders inside it. Both views share exactly the same colour scale. Green/blue = shorter, orange/red = longer.")
-    grid = get_grid(result, float(grid_size))
-    # Percentile dampens single extreme long-haul outliers but both maps share a scale.
-    max_scale = max(float(np.quantile(result["original_distance_km"], .95)), 0.01)
-    x, y = st.columns(2, gap="medium")
-    with x:
-        st.markdown('<div class="map-heading">Before · average distance per cell</div>', unsafe_allow_html=True)
-        st.pydeck_chart(grid_map(grid, warehouses, view, "mean_original_km", max_scale),
-                        height=450, use_container_width=True, key="heat_before")
-    with y:
-        st.markdown('<div class="map-heading">After · average distance per cell</div>', unsafe_allow_html=True)
-        st.pydeck_chart(grid_map(grid, warehouses, view, "mean_optimised_km", max_scale),
-                        height=450, use_container_width=True, key="heat_after")
-    st.caption(f"{len(grid):,} occupied geographic cells · {grid_size} km approximate grid resolution · {n:,} records aggregated · Shared colour scale: 0–{max_scale:.1f} km (95th percentile of baseline; values above this saturate).")
+def render_insights(result: pd.DataFrame, warehouses: pd.DataFrame) -> None:
+    section_heading("Step 2", "Where the savings come from",
+                    "How the workload shifts between warehouses, and which moves save the most distance.")
+    first, second = st.columns(2, gap="large")
+    with first:
+        st.markdown("**Orders per warehouse, today vs optimised**")
+        chart_movements(result, warehouses)
+    with second:
+        st.markdown("**Distance saved, by the warehouse orders leave**")
+        chart_savings(result, warehouses)
+    st.markdown("**Where reassigned orders move**")
+    transfer_table(result)
 
-with map_tabs[2]:
-    st.caption("Blue intensity shows cumulative kilometres saved across all orders in each grid square. Brighter cells represent the biggest combined improvement opportunities, not simply the most customers.")
-    grid = get_grid(result, float(grid_size))
-    upper = max(float(np.quantile(grid["total_saved_km"], .95)), 0.01)
-    st.pydeck_chart(grid_map(grid, warehouses, view, "total_saved_km", upper, kind="savings"),
-                    height=480, use_container_width=True, key="savings_map")
-    st.caption(f"Sum of grid savings = {grid['total_saved_km'].sum():,.1f} km · Colour saturation at {upper:,.1f} km saved per cell (95th percentile).")
-    hotspots = grid.nlargest(8, "total_saved_km")[["center_lat", "center_lon", "orders", "total_saved_km", "mean_saved_km"]].copy()
-    st.markdown("**Highest-impact geographical cells**")
-    st.dataframe(hotspots.rename(columns={"center_lat":"Latitude", "center_lon":"Longitude", "orders":"Orders", "total_saved_km":"Total saved (km)", "mean_saved_km":"Saved / order (km)"}).round(2),
-                 hide_index=True, use_container_width=True)
 
-with map_tabs[3]:
+def render_explorer(result: pd.DataFrame, warehouses: pd.DataFrame) -> None:
+    section_heading("Step 3", "Look up individual orders",
+                    "Filter by warehouse or status, or search for an order ID.")
     f1, f2, f3 = st.columns([1, 1, 2], gap="small")
     with f1:
-        warehouse_filter = st.selectbox("Original warehouse", ["All", *warehouses["warehouse_id"].tolist()])
+        warehouse_filter = st.selectbox("Warehouse today", ["All", *warehouses["warehouse_id"].tolist()])
     with f2:
-        status_filter = st.selectbox("Assignment status", ["All", "Reassigned", "Unchanged"])
+        status_filter = st.selectbox("Status", ["All", "Reassigned", "Unchanged"])
     with f3:
-        search = st.text_input("Find orderId", placeholder="Search part of an order ID", max_chars=100)
+        search = st.text_input("Order ID", placeholder="Search part of an order ID", max_chars=100)
     display = result
     if warehouse_filter != "All":
         display = display.loc[display["original_warehouse"].eq(warehouse_filter)]
@@ -406,65 +615,96 @@ with map_tabs[3]:
         display = display.loc[display["assignment_status"].eq(status_filter)]
     if search:
         display = display.loc[display["orderId"].astype("string").str.contains(search, regex=False, case=False, na=False)]
-    st.caption(f"{len(display):,} matching rows. Showing up to 2,000 rows in the browser; downloads include all matching records.")
     columns = ["orderId", "original_warehouse", "optimised_warehouse", "original_distance_km",
                "optimised_distance_km", "distance_saved_km", "assignment_status"]
-    st.dataframe(display[columns].head(2000), use_container_width=True, hide_index=True,
-                 column_config={
-                     "original_distance_km":st.column_config.NumberColumn("Original km",format="%.2f"),
-                     "optimised_distance_km":st.column_config.NumberColumn("Optimised km",format="%.2f"),
-                     "distance_saved_km":st.column_config.NumberColumn("Saved km",format="%.2f"),
-                 })
-    st.download_button("↓ Export filtered rows", data=output_csv(display), file_name="filtered_warehouse_allocations.csv",
-                       mime="text/csv", use_container_width=False)
+    st.dataframe(display[columns].head(2000), width="stretch", hide_index=True, column_config={
+        "orderId": st.column_config.TextColumn("Order"),
+        "original_warehouse": st.column_config.TextColumn("Warehouse today"),
+        "optimised_warehouse": st.column_config.TextColumn("Optimised warehouse"),
+        "original_distance_km": st.column_config.NumberColumn("Km today", format="%.2f"),
+        "optimised_distance_km": st.column_config.NumberColumn("Km optimised", format="%.2f"),
+        "distance_saved_km": st.column_config.NumberColumn("Km saved", format="%.2f"),
+        "assignment_status": st.column_config.TextColumn("Status"),
+    })
+    shown_note = " The table shows the first 2,000." if len(display) > 2000 else ""
+    st.caption(f"{len(display):,} matching orders.{shown_note}")
+    st.download_button("Download matching orders", data=output_csv(display),
+                       file_name="filtered_warehouse_allocations.csv", mime="text/csv",
+                       icon=":material/download:")
 
-st.markdown('<div class="section-tag">02 / Allocation insights</div>', unsafe_allow_html=True)
-first, second = st.columns(2, gap="medium")
-with first:
-    st.markdown("**Order distribution by warehouse**")
-    chart_movements(result, warehouses)
-with second:
-    st.markdown("**Distance saved by original warehouse**")
-    chart_savings(result, warehouses)
 
-st.markdown('<div class="section-tag">03 / Export optimisation results</div>', unsafe_allow_html=True)
-exp1, exp2 = st.columns(2, gap="medium")
-with exp1:
-    st.markdown("**Detailed optimisation audit**")
-    st.caption("Original + new coordinates, original/optimised distances, total improvement per order, and reassignment status.")
-    st.download_button("↓ Download detailed CSV", data=output_csv(result),
-                       file_name="warehouse_optimisation_full.csv", mime="text/csv",
-                       use_container_width=True, type="primary")
-with exp2:
-    st.markdown("**Drop-in replacement CSV**")
-    st.caption("The same original three headers, with warehouseLocation_Coordinates replaced by the optimised assignment.")
-    st.download_button("↓ Download optimised 3-column CSV", data=output_csv(result, minimal=True),
-                       file_name="warehouse_assignments_optimised.csv", mime="text/csv",
-                       use_container_width=True)
+def render_downloads(result: pd.DataFrame) -> None:
+    section_heading("Step 4", "Download the results", "Both files include every valid order.")
+    left, right = st.columns(2, gap="medium")
+    with left, st.container(border=True):
+        st.markdown("**Full report**")
+        st.caption("Today's and the optimised warehouse for each order, both distances, km saved and status.")
+        st.download_button("Download full report", data=output_csv(result),
+                           file_name="warehouse_optimisation_full.csv", mime="text/csv",
+                           icon=":material/download:", type="primary", width="stretch")
+    with right, st.container(border=True):
+        st.markdown("**Updated input file**")
+        st.caption("Same three columns as your input, with each warehouse replaced by the optimised one.")
+        st.download_button("Download updated file", data=output_csv(result, minimal=True),
+                           file_name="warehouse_assignments_optimised.csv", mime="text/csv",
+                           icon=":material/download:", width="stretch")
 
-with st.expander("Data contract, limitations and methodology"):
-    st.markdown("""
-**Required CSV columns (case-sensitive):**
 
-`orderId`, `warehouseLocation_Coordinates`, `customerLocation_Coordinates`
+def render_methodology(rejected: pd.DataFrame) -> None:
+    st.write("")
+    with st.expander("How it works, and its limits"):
+        st.markdown("""
+**Input:** a CSV with the columns `orderId`, `warehouseLocation_Coordinates` and `customerLocation_Coordinates` (case-sensitive).
+Coordinates are latitude then longitude, such as `"(-33.84750, 150.90060)"`.
+Each coordinate contains a comma, so it **must be quoted** in the CSV.
 
-**Accepted coordinate format:** latitude then longitude, such as `"(-33.84750, 150.90060)"`.
-Because coordinates contain commas, each coordinate value **must be quoted** in a CSV.
+**Finding warehouses:** every distinct warehouse coordinate in the file counts as one warehouse.
+Coordinates are rounded to 5 decimal places so tiny GPS differences merge.
+A warehouse that never appears in the file can't be chosen.
 
-**Warehouse discovery:** Every distinct origin coordinate in the CSV defines one possible warehouse.
-GPS differences smaller than 0.00001 degrees are rounded together. A warehouse never mentioned in any original row **cannot** be discovered and therefore cannot be selected.
+**Choosing the nearest:** each order is checked on its own against every warehouse, using straight-line (Haversine) distance.
+If the current warehouse is already the closest, or tied for closest, the order stays where it is.
 
-**Optimisation assumptions:** Every listed warehouse can fulfil any order, with no capacity, inventory, or product restrictions. Each order is considered independently, and the objective is the sum of one-way warehouse-to-customer great-circle distances. There is no delivery routing or vehicle consolidation.
+**Not included:** road distance, delivery time, shipping cost, warehouse capacity, stock levels, product restrictions, or combining deliveries into routes.
+If those matter, a solver that handles constraints is needed.
 
-**Large datasets:** The distance calculation runs in bounded-memory chunks. Individual markers are capped by the visualisation control, but every valid order contributes to totals, assignments and spatial heatmaps. Geographic cells are aggregated before rendering for responsiveness.
-
-**Limitations:** Haversine is not driving distance. The model does not predict delivery time or monetary shipping cost. If warehouses have different inventory or transport tariffs, a constraint-aware solver will be required.
+**Large files:** distances are calculated in chunks to keep memory use bounded.
+Maps show a sample of dots above the limit set in the sidebar, but every order counts in totals, heatmaps and downloads.
 """)
+    if not rejected.empty:
+        with st.expander(f"Rows skipped because they were invalid ({len(rejected):,})"):
+            st.dataframe(rejected.head(500), hide_index=True, width="stretch")
+            st.download_button("Download invalid rows", rejected.to_csv(index=False).encode("utf-8-sig"),
+                               file_name="warehouse_invalid_rows.csv", mime="text/csv",
+                               icon=":material/download:")
 
-if not prepared.rejected.empty:
-    with st.expander(f"Rejected input records ({len(prepared.rejected):,})"):
-        st.dataframe(prepared.rejected.head(500), hide_index=True, use_container_width=True)
-        st.download_button("↓ Download invalid row report", prepared.rejected.to_csv(index=False).encode("utf-8-sig"),
-                           file_name="warehouse_invalid_rows.csv", mime="text/csv")
 
-st.markdown('<div class="footnote">WAREHOUSE ATLAS · Geographic reallocation analysis · All displayed distances are straight-line estimates. Synthetic samples are illustrative, not operational shipments.</div>', unsafe_allow_html=True)
+# --- Page ---
+
+source, data, upload_error, settings = render_sidebar()
+render_hero()
+
+if data is None:
+    render_upload_help(upload_error)
+    st.stop()
+
+try:
+    prepared, result = analyse(data)
+except Exception as exc:
+    render_upload_help(f"Unable to process this dataset: {exc}")
+    st.stop()
+
+warehouses = prepared.warehouses
+render_dataset_chips(source, len(result), len(warehouses), len(prepared.rejected))
+for message in prepared.notes:
+    st.warning(message)
+
+render_result(result)
+render_maps(result, warehouses, settings)
+render_insights(result, warehouses)
+render_explorer(result, warehouses)
+render_downloads(result)
+render_methodology(prepared.rejected)
+
+html('<div class="footnote">Warehouse Atlas · All distances are straight-line estimates. '
+     'The sample Sydney orders are made up for illustration.</div>')
